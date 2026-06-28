@@ -1,130 +1,131 @@
-:- use_module(library(lists)).
-:- use_module(library(aggregate)).
+(defparameter *conexoes*
+  '((alice . bob) (alice . carol) (alice . diana)
+    (bob   . carol) (bob   . eve)
+    (carol . diana) (carol . frank)
+    (diana . eve)   (diana . george)
+    (eve   . frank) (eve   . henry)
+    (frank . george)
+    (george . henry)
+    (henry  . ivan)
+    (ivan   . alice) (ivan . julia)
+    (julia  . alice) (julia . bob)))
 
-usuario(alice).
-usuario(bob).
-usuario(carol).
-usuario(diana).
-usuario(eve).
-usuario(frank).
-usuario(george).
-usuario(henry).
-usuario(ivan).
-usuario(julia).
+(defun nomes-unicos (conexoes)
+  (reduce (lambda (acc par)
+            (let ((acc1 (adjoin (car par) acc :test #'eq)))
+              (adjoin (cdr par) acc1 :test #'eq)))
+          conexoes
+          :initial-value '()))
 
-segue(alice, bob).
-segue(alice, carol).
-segue(alice, diana).
-segue(bob,   carol).
-segue(bob,   eve).
-segue(carol, diana).
-segue(carol, frank).
-segue(diana, eve).
-segue(diana, george).
-segue(eve,   frank).
-segue(eve,   henry).
-segue(frank, george).
-segue(george,henry).
-segue(henry, ivan).
-segue(ivan,  alice).
-segue(ivan,  julia).
-segue(julia, alice).
-segue(julia, bob).
+(defun seguindo-de (nome conexoes)
+  (remove-duplicates
+   (mapcar #'cdr
+           (remove-if-not (lambda (par) (eq (car par) nome)) conexoes))))
 
-amigos_diretos(Nome, ListaOrdenada) :-
-    findall(X, segue(Nome, X), Lista),
-    sort(Lista, ListaOrdenada).
+(defun construir-grafo (conexoes)
+  (mapcar (lambda (nome) (cons nome (seguindo-de nome conexoes)))
+          (nomes-unicos conexoes)))
 
-caminho_existe(X, Y, 1) :-
-    segue(X, Y).
-caminho_existe(X, Y, N) :-
-    N > 1,
-    segue(X, Z),
-    N1 is N - 1,
-    caminho_existe(Z, Y, N1).
+(defun seguindo (grafo nome)
+  (cdr (assoc nome grafo)))
 
-grau_de_separacao(X, X, 0) :- !.
-grau_de_separacao(X, Y, Grau) :-
-    X \== Y,
-    between(1, 10, Grau),
-    caminho_existe(X, Y, Grau),
-    !.
+(defun seguidores-de (grafo nome)
+  (mapcar #'car
+          (remove-if-not (lambda (entrada) (member nome (cdr entrada)))
+                          grafo)))
 
-amigos_em_comum(A, B, ComunsOrdenados) :-
-    findall(X, (segue(A, X), segue(B, X)), Comuns),
-    sort(Comuns, ComunsOrdenados).
+(defun amigos-diretos (grafo nome)
+  (sort (copy-list (seguindo grafo nome)) #'string< :key #'symbol-name))
 
-candidato_sugestao(Nome, Candidato) :-
-    segue(Nome, Amigo),
-    segue(Amigo, Candidato),
-    Candidato \== Nome,
-    \+ segue(Nome, Candidato).
+(defun grau-de-separacao (grafo origem destino)
+  (cond
+    ((eq origem destino) 0)
+    (t (labels ((bfs-aux (fronteira visitados distancia)
+                  (cond
+                    ((null fronteira) nil)
+                    ((member destino fronteira) distancia)
+                    (t (let* ((vizinhos (remove-duplicates
+                                          (mapcan (lambda (n) (copy-list (seguindo grafo n)))
+                                                  fronteira)))
+                              (novos (remove-if (lambda (v) (member v visitados))
+                                                 vizinhos)))
+                         (if (null novos)
+                             nil
+                             (bfs-aux novos
+                                      (union novos visitados)
+                                      (1+ distancia))))))))
+         (bfs-aux (list origem) (list origem) 1)))))
 
-sugerir_conexoes(Nome, TopN, RankingTopN) :-
-    findall(Candidato, candidato_sugestao(Nome, Candidato), Brutos),
-    list_to_set(Brutos, Unicos),
-    findall(ScoreNeg-Candidato,
-            ( member(Candidato, Unicos),
-              aggregate_all(count, candidato_sugestao(Nome, Candidato), Score),
-              ScoreNeg is -Score
-            ),
-            Pares),
-    msort(Pares, Ordenado),
-    primeiros_n(Ordenado, TopN, OrdenadoTopN),
-    maplist(inverter_score, OrdenadoTopN, RankingTopN).
+(defun amigos-em-comum (grafo a b)
+  (sort (copy-list (intersection (seguindo grafo a) (seguindo grafo b)))
+        #'string< :key #'symbol-name))
 
-inverter_score(ScoreNeg-Nome, Nome-Score) :- Score is -ScoreNeg.
+(defun contar-ocorrencias (lista)
+  (reduce (lambda (acc elem)
+            (let ((par (assoc elem acc)))
+              (if par
+                  (cons (cons elem (1+ (cdr par))) (remove par acc :test #'equal))
+                  (cons (cons elem 1) acc))))
+          lista
+          :initial-value '()))
 
-primeiros_n(Lista, N, Primeiros) :-
-    length(Prefixo, N),
-    ( append(Prefixo, _, Lista) -> Primeiros = Prefixo ; Primeiros = Lista ).
+(defun sugerir-conexoes (grafo nome &optional (top-n 5))
+  (let* ((ja-segue (cons nome (seguindo grafo nome)))
+         (candidatos-brutos
+           (mapcan (lambda (amigo) (copy-list (seguindo grafo amigo)))
+                   (seguindo grafo nome)))
+         (candidatos-validos
+           (remove-if (lambda (c) (member c ja-segue)) candidatos-brutos))
+         (contagens (contar-ocorrencias candidatos-validos))
+         (ordenado (sort (copy-list contagens)
+                          (lambda (p1 p2)
+                            (cond ((> (cdr p1) (cdr p2)) t)
+                                  ((< (cdr p1) (cdr p2)) nil)
+                                  (t (string< (symbol-name (car p1))
+                                               (symbol-name (car p2)))))))))
+    (subseq ordenado 0 (min top-n (length ordenado)))))
 
-usuarios_influentes(TopN, RankingTopN) :-
-    findall(ScoreNeg-Nome,
-            ( usuario(Nome),
-              aggregate_all(count, segue(_, Nome), C),
-              ScoreNeg is -C
-            ),
-            Pares),
-    msort(Pares, Ordenado),
-    primeiros_n(Ordenado, TopN, OrdenadoTopN),
-    maplist(inverter_score, OrdenadoTopN, RankingTopN).
+(defun usuarios-influentes (grafo &optional (top-n 5))
+  (let* ((ranking (mapcar (lambda (entrada)
+                             (cons (car entrada) (length (seguidores-de grafo (car entrada)))))
+                           grafo))
+         (ordenado (sort (copy-list ranking)
+                          (lambda (p1 p2)
+                            (cond ((> (cdr p1) (cdr p2)) t)
+                                  ((< (cdr p1) (cdr p2)) nil)
+                                  (t (string< (symbol-name (car p1))
+                                               (symbol-name (car p2)))))))))
+    (subseq ordenado 0 (min top-n (length ordenado)))))
 
-listar_usuarios(ListaOrdenada) :-
-    findall(Nome, usuario(Nome), Lista),
-    sort(Lista, ListaOrdenada).
+(defun listar-usuarios (grafo)
+  (sort (copy-list (mapcar #'car grafo)) #'string< :key #'symbol-name))
 
-main :-
-    writeln('======================================================='),
-    writeln('   ANALISE DE REDES SOCIAIS -- Prolog (Logico)'),
-    writeln('======================================================='),
+(defun main ()
+  (let ((grafo (construir-grafo *conexoes*)))
+    (format t "=======================================================~%")
+    (format t "   ANALISE DE REDES SOCIAIS -- Lisp (Funcional)~%")
+    (format t "=======================================================~%")
 
-    listar_usuarios(Usuarios),
-    format('~nUsuarios na rede: ~w~n', [Usuarios]),
+    (format t "~%Usuarios na rede: ~{~a~^, ~}~%" (listar-usuarios grafo))
 
-    amigos_diretos(alice, AmigosAlice),
-    format('~nAmigos diretos de alice: ~w~n', [AmigosAlice]),
+    (format t "~%Amigos diretos de alice: ~{~a~^, ~}~%" (amigos-diretos grafo 'alice))
 
-    writeln('\nGraus de separacao:'),
-    forall(member(A-B, [alice-henry, alice-ivan, alice-julia, julia-george]),
-           ( grau_de_separacao(A, B, Grau)
-           -> format('   ~w -> ~w: ~w grau(s)~n', [A, B, Grau])
-           ;  format('   ~w -> ~w: sem caminho~n', [A, B])
-           )),
+    (format t "~%Graus de separacao:~%")
+    (dolist (par '((alice . henry) (alice . ivan) (alice . julia) (julia . george)))
+      (format t "   ~a -> ~a: ~a grau(s)~%"
+              (car par) (cdr par) (grau-de-separacao grafo (car par) (cdr par))))
 
-    writeln('\nAmigos em comum:'),
-    amigos_em_comum(alice, bob, ComAB), format('   alice & bob:   ~w~n', [ComAB]),
-    amigos_em_comum(alice, carol, ComAC), format('   alice & carol: ~w~n', [ComAC]),
-    amigos_em_comum(bob, diana, ComBD), format('   bob & diana:   ~w~n', [ComBD]),
+    (format t "~%Amigos em comum:~%")
+    (format t "   alice & bob:   ~{~a~^, ~}~%" (amigos-em-comum grafo 'alice 'bob))
+    (format t "   alice & carol: ~{~a~^, ~}~%" (amigos-em-comum grafo 'alice 'carol))
+    (format t "   bob & diana:   ~{~a~^, ~}~%" (amigos-em-comum grafo 'bob 'diana))
 
-    writeln('\nSugestoes de conexao para alice:'),
-    sugerir_conexoes(alice, 5, Sugestoes),
-    forall(member(Cand-Score, Sugestoes),
-           format('   ~w (~w amigo(s) em comum)~n', [Cand, Score])),
+    (format t "~%Sugestoes de conexao para alice:~%")
+    (dolist (par (sugerir-conexoes grafo 'alice))
+      (format t "   ~a (~a amigo(s) em comum)~%" (car par) (cdr par)))
 
-    writeln('\nTop usuarios por numero de seguidores:'),
-    usuarios_influentes(5, Influentes),
-    forall(member(Nome-Score, Influentes),
-           format('   ~w: ~w seguidores~n', [Nome, Score])).
+    (format t "~%Top usuarios por numero de seguidores:~%")
+    (dolist (par (usuarios-influentes grafo))
+      (format t "   ~a: ~a seguidores~%" (car par) (cdr par)))))
 
-:- initialization(main, main).
+(main)
