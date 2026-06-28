@@ -1,20 +1,26 @@
-# Common Lisp
+# Prolog
 
-Implementação da análise de redes sociais utilizando programação funcional.
+Implementação da análise de redes sociais utilizando programação lógica.
 
 ## Arquivo
 
-- `rede_social.lisp`
+- `rede_social.pl`
 
 ## Como executar
 
 ```bash
-sbcl --script rede_social.lisp
+swipl rede_social.pl
+```
+
+ou
+
+```bash
+swipl -f rede_social.pl
 ```
 
 ## Paradigma
 
-- Funções puras
-- Recursão
-- Imutabilidade
-- Processamento de listas
+- Fatos
+- Regras
+- Unificação
+- Backtracking
